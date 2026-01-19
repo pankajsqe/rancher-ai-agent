@@ -98,7 +98,7 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str = None, llm: B
                 # Exclude "ephemeral" messages from being stored in memory
                 tags = ws_request.tags or []
                 if "ephemeral" in tags:
-                    config["configurable"]["thread_id"] = None
+                    config["configurable"]["thread_id"] = ""
 
                 input_messages = [{"role": "user", "content": content}]
 
