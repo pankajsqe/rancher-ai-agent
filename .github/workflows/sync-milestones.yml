@@ -16,9 +16,9 @@ jobs:
           github-token: ${{ secrets.MILESTONE_SYNC_TOKEN }}
           script: |
             const targetRepos = [
-              { owner: 'rancher-sandbox', repo: 'rancher-ai-ui' },
-              { owner: 'rancher-sandbox', repo: 'rancher-ai-mcp' },
-              { owner: 'rancher-sandbox', repo: 'rancher-ai-agent' }
+              { owner: 'rancher', repo: 'rancher-ai-ui' },
+              { owner: 'rancher', repo: 'rancher-ai-mcp' },
+              { owner: 'rancher', repo: 'rancher-ai-agent' }
             ];
             
             // Handle Milestone Events

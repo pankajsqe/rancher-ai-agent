@@ -6,7 +6,7 @@
 
 The system is composed of a **UI Extension** for user interaction, a **ReAct Agent** for intelligent decision-making, and an **MCP Server** that acts as the intermediary between the agent and the Rancher API. 
 
-### [ReAct Agent](https://github.com/rancher-sandbox/rancher-ai-agent)
+### [ReAct Agent](https://github.com/rancher/rancher-ai-agent)
 
 The **ReAct Agent** is the orchestrator of the system’s intelligence. It leverages a **Large Language Model (LLM)** as its **reasoning engine**, while the agent itself provides the structure, coordination, and secure execution of actions.
 
@@ -22,7 +22,7 @@ The **ReAct Agent** is the orchestrator of the system’s intelligence. It lever
 - Calls external tools (via the MCP Server) as directed by the LLM.  
 - Ensures secure interactions by passing the user’s Rancher token to the MCP server for authentication and authorization.  
 
-#### [MCP Server](https://github.com/rancher-sandbox/rancher-ai-mcp)
+#### [MCP Server](https://github.com/rancher/rancher-ai-mcp)
 
 The **MCP Server** acts as a secure, controlled gateway between the ReAct Agent and the Rancher and Kubernetes APIs. Its functions include:
 
