@@ -36,8 +36,8 @@ class WebSocketRequest:
     tags: list[str] = None
     agent: str = ""
 
-@router.websocket("/agent/ws/messages")
-@router.websocket("/agent/ws/messages/{thread_id}")
+@router.websocket("/v1/ws/messages")
+@router.websocket("/v1/ws/messages/{thread_id}")
 async def websocket_endpoint(websocket: WebSocket, thread_id: str = None, llm: BaseLanguageModel = Depends(get_llm)):
     """
     WebSocket endpoint for the agent.
