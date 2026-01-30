@@ -10,12 +10,9 @@ metadata:
   name: agent-role
   namespace: cattle-ai-agent-system
 rules:
-{{- if not .Values.insecureSkipTls }}
 - apiGroups: [""]
   resources: ["secrets"]
-  verbs: ["get"]
-  resourceNames: ["cattle-mcp-ca"]
-{{- end }}
+  verbs: ["get", "list"]
 - apiGroups: ["apps"]
   resources: ["deployments"]
   verbs: ["get", "update", "patch"]
