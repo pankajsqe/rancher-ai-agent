@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 
+DEFAULT_AGENT_NAME = "rancher"
 NAMESPACE = "cattle-ai-agent-system"
 CRD_GROUP = "ai.cattle.io"
 CRD_VERSION = "v1alpha1"
@@ -92,6 +93,7 @@ class HumanValidationTool(BaseModel):
 class AgentConfig(BaseModel):
     """Configuration for a single agent."""
     name: str 
+    displayName: str
     description: str 
     system_prompt: str 
     mcp_url: str
@@ -114,6 +116,7 @@ def _init_k8s_client():
 
 def _crd_to_agent_config(crd_obj: dict) -> AgentConfig:
     """Convert CRD object to AgentConfig."""
+    metadata = crd_obj.get("metadata", {})
     spec = crd_obj.get("spec", {})
     
     # Convert human validation tools
@@ -127,7 +130,8 @@ def _crd_to_agent_config(crd_obj: dict) -> AgentConfig:
         )
     
     return AgentConfig(
-        name=spec.get("name", ""),
+        name=metadata.get("name", ""),
+        displayName=spec.get("displayName", ""),
         description=spec.get("description", ""),
         system_prompt=spec.get("systemPrompt", ""),
         mcp_url=spec.get("mcpURL", ""),
@@ -137,18 +141,18 @@ def _crd_to_agent_config(crd_obj: dict) -> AgentConfig:
     )
 
 
-def _create_default_agents(api: client.CustomObjectsApi):
-    """Create default agents in the cluster."""
-    default_agents = [
+def _create_default_ai_agent_config_crds(api: client.CustomObjectsApi):
+    """Create default AIAgentConfigs in the cluster."""
+    default_ai_agent_config_crds = [
         {
             "apiVersion": f"{CRD_GROUP}/{CRD_VERSION}",
             "kind": "AIAgentConfig",
             "metadata": {
-                "name": "rancher",
+                "name": DEFAULT_AGENT_NAME,
                 "namespace": NAMESPACE,
             },
             "spec": {
-                "name": "Rancher",
+                "displayName": "Rancher",
                 "description": "Manages Rancher resources and operations",
                 "systemPrompt": RANCHER_AGENT_PROMPT,
                 "mcpURL": "rancher-mcp-server.cattle-ai-agent-system.svc",
@@ -170,7 +174,7 @@ def _create_default_agents(api: client.CustomObjectsApi):
                 "namespace": NAMESPACE,
             },
             "spec": {
-                "name": "Fleet",
+                "displayName": "Fleet",
                 "description": "Manages Fleet resources such as GitRepos and Bundles",
                 "systemPrompt": RANCHER_AGENT_PROMPT,
                 "mcpURL": "rancher-mcp-server.cattle-ai-agent-system.svc",
@@ -182,36 +186,36 @@ def _create_default_agents(api: client.CustomObjectsApi):
         }
     ]
     
-    for agent in default_agents:
+    for crd in default_ai_agent_config_crds:
         try:
             api.create_namespaced_custom_object(
                 group=CRD_GROUP,
                 version=CRD_VERSION,
                 namespace=NAMESPACE,
                 plural=CRD_PLURAL,
-                body=agent,
+                body=crd,
             )
-            logging.info(f"Created default agent: {agent['metadata']['name']}")
+            logging.info(f"Created default AIAgentConfig: {crd['metadata']['name']}")
         except ApiException as e:
             if e.status == 409:
-                logging.debug(f"Agent {agent['metadata']['name']} already exists")
+                logging.debug(f"AIAgentConfig {crd['metadata']['name']} already exists")
             else:
-                logging.error(f"Failed to create agent {agent['metadata']['name']}: {e}")
+                logging.error(f"Failed to create AIAgentConfig {crd['metadata']['name']}: {e}")
 
 
-def load_agent_configs() -> List[AgentConfig]:
+def ensure_default_ai_agent_config_crds():
     """
-    Load AIAgentConfig CRDs from the cattle-ai-agent-system namespace.
+    Ensure default AIAgentConfigs exist in the cattle-ai-agent-system namespace.
     
-    If no agents exist, creates the default weather, math, and rancher agents.
+    If no CRDs exist, creates the default rancher and fleet CRDs.
     
     Returns:
-        List of AgentConfig objects loaded from CRDs.
+        List of AIAgentConfig objects
     """
     try:
         api = _init_k8s_client()
         
-        # Try to list existing agents
+        # Try to list existing CRDs
         try:
             response = api.list_namespaced_custom_object(
                 group=CRD_GROUP,
@@ -222,10 +226,10 @@ def load_agent_configs() -> List[AgentConfig]:
             
             items = response.get("items", [])
             
-            # If no agents exist, create defaults
+            # If no CRDs exist, create defaults
             if not items:
-                logging.info("No AIAgentConfig found, creating default agents")
-                _create_default_agents(api)
+                logging.info("No AIAgentConfig found, creating default AIAgentConfigs")
+                _create_default_ai_agent_config_crds(api)
                 
                 # Re-fetch after creation
                 response = api.list_namespaced_custom_object(
@@ -235,17 +239,9 @@ def load_agent_configs() -> List[AgentConfig]:
                     plural=CRD_PLURAL,
                 )
                 items = response.get("items", [])
-            
-            # Convert CRDs to AgentConfig objects, only enabled ones
-            agent_configs = []
-            for item in items:
-                spec = item.get("spec", {})
-                if spec.get("enabled", True): 
-                    agent_configs.append(_crd_to_agent_config(item))
-            
-            logging.info(f"Loaded {len(agent_configs)} enabled agent configs from CRDs")
-            return agent_configs
-            
+
+            return items
+
         except ApiException as e:
             if e.status == 404:
                 logging.warning(f"Namespace {NAMESPACE} or CRD not found")
@@ -256,3 +252,25 @@ def load_agent_configs() -> List[AgentConfig]:
     except Exception as e:
         logging.error(f"Failed to initialize Kubernetes client: {e}")
         return []
+
+
+def load_agent_configs() -> List[AgentConfig]:
+    """
+    Convert AIAgentConfig CRDs to AgentConfig objects.
+
+    Gets only enabled agent configs.
+    
+    Returns:
+        List of enabled AgentConfig objects
+    """
+    items = ensure_default_ai_agent_config_crds()
+
+    agent_configs = []
+    for item in items:
+        spec = item.get("spec", {})
+        if spec.get("enabled", True): 
+            agent_configs.append(_crd_to_agent_config(item))
+    
+    logging.info(f"Loaded {len(agent_configs)} enabled agent configs from CRDs")
+
+    return agent_configs

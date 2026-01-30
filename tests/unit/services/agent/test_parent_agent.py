@@ -74,7 +74,8 @@ def agent_state():
         "messages": [
             HumanMessage(content="How do I deploy a workload in Rancher?")
         ],
-        "summary": ""
+        "summary": {},
+        "selected-agent": ""
     }
 
 
@@ -151,7 +152,8 @@ def test_choose_child_agent_includes_all_agents_in_prompt(mock_dispatch, mock_ll
     assert "Expert in Harvester HCI" in system_message.content
 
 
-def test_choose_child_agent_with_agent_override(mock_llm, mock_child_agents, mock_checkpointer, agent_state):
+@patch("app.services.agent.parent.dispatch_custom_event")
+def test_choose_child_agent_with_agent_override(mock_dispatch, mock_llm, mock_child_agents, mock_checkpointer, agent_state):
     """Verify that agent override in config forces selection of specific agent."""
     builder = ParentAgentBuilder(
         llm=mock_llm,
@@ -174,6 +176,10 @@ def test_choose_child_agent_with_agent_override(mock_llm, mock_child_agents, moc
     assert isinstance(result, Command)
     assert result.goto == "Fleet"
     assert builder.agent_selected == "Fleet"
+    assert result.update["selected_agent"] == {
+        "name": "Fleet",
+        "mode": "manual"
+    }
 
 
 @patch('app.services.agent.parent.dispatch_custom_event')
@@ -193,7 +199,12 @@ def test_choose_child_agent_dispatches_event(mock_dispatch, mock_llm, mock_child
     mock_dispatch.assert_called_once()
     call_args = mock_dispatch.call_args
     assert call_args[0][0] == "subagent_choice_event"
-    assert "Fleet" in call_args[0][1]
+    event_name = mock_dispatch.call_args[0][0]
+    event_payload = mock_dispatch.call_args[0][1]
+    assert event_name == "subagent_choice_event"
+    assert "Fleet" in event_payload
+    assert "auto" in event_payload
+    assert "<agent-metadata>" in event_payload
 
 
 @patch('app.services.agent.parent.dispatch_custom_event')
@@ -205,7 +216,8 @@ def test_choose_child_agent_with_conversation_context(mock_dispatch, mock_llm, m
             AIMessage(content="Fleet is a GitOps tool..."),
             HumanMessage(content="How do I use it with Rancher?")
         ],
-        "summary": ""
+        "summary": {},
+        "selected-agent": ""
     }
     
     builder = ParentAgentBuilder(

@@ -12,6 +12,8 @@ from langgraph.types import Command
 from langchain_core.callbacks.manager import dispatch_custom_event
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from dataclasses import dataclass
+
+from .loader import DEFAULT_AGENT_NAME
 from .base import BaseAgentBuilder, AgentState
 
 SYSTEM_ROUTER_PROMPT = """You are a routing supervisor for a multi-agent system. Your job is to analyze the user's request and select the most appropriate child agent to handle it.
@@ -80,7 +82,21 @@ class ParentAgentBuilder(BaseAgentBuilder):
         agent_override = config.get("configurable", {}).get("agent", "")
         if agent_override:
             self.agent_selected = agent_override
-            return Command(goto=agent_override)
+
+            dispatch_custom_event(
+                "subagent_choice_event",
+                f'<agent-metadata>{{"agentName": "{agent_override}", "selectionMode": "manual"}}</agent-metadata>',
+            )
+
+            return Command(
+                goto=agent_override,
+                update={
+                    "selected_agent": {
+                        "name": agent_override,
+                        "mode": "manual"
+                    }
+                }
+            )
 
         messages = state["messages"]
 
@@ -89,21 +105,32 @@ class ParentAgentBuilder(BaseAgentBuilder):
         for child in self.child_agents:
             router_prompt += f"- {child.name}: {child.description}\n"
         router_prompt += f"\nUSER'S REQUEST: {messages[-1].content}\n"
-                
-        user_and_ai_messages = [msg for msg in messages if isinstance(msg, (HumanMessage, AIMessage, SystemMessage))]
         
+        user_and_ai_messages = [msg for msg in self._get_messages_from_last_summary(state) if isinstance(msg, (HumanMessage, AIMessage, SystemMessage))]
+
         # Use LLM to select the appropriate child agent
         child_agent = self.llm.invoke([SystemMessage(content=router_prompt)] + user_and_ai_messages).content
+        if child_agent not in [child.name for child in self.child_agents]:
+            # Fallback to default agent if the agent selection from LLM is invalid
+            child_agent = DEFAULT_AGENT_NAME
 
         self.agent_selected = child_agent
 
         dispatch_custom_event(
             "subagent_choice_event",
-            f'<agent-metadata>{{"agentName": "{child_agent}"}}</agent-metadata>',
+            f'<agent-metadata>{{"agentName": "{child_agent}", "selectionMode": "auto"}}</agent-metadata>',
         )
 
         # Return Command to navigate to the selected child agent
-        return Command(goto=child_agent)
+        return Command(
+            goto=child_agent,
+            update={
+                "selected_agent": {
+                    "name": child_agent,
+                    "mode": "auto"
+                }
+            }
+        )
 
     def build(self) -> CompiledStateGraph:
         """
@@ -124,13 +151,13 @@ class ParentAgentBuilder(BaseAgentBuilder):
         for child in self.child_agents:
             workflow.add_node(child.name, child.agent)
             workflow.add_conditional_edges(
-            child.name,
-            self.should_summarize_conversation,
-            {
-                "summarize_conversation": "summarize_conversation",
-                "end": END,
-            },
-        )
+                child.name,
+                self.should_summarize_conversation,
+                {
+                    "summarize_conversation": "summarize_conversation",
+                    "end": END,
+                },
+            )
 
         
         # Set the routing node as the entry point

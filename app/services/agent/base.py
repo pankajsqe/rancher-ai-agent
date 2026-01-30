@@ -6,7 +6,7 @@ import json
 import logging
 import langgraph.types
 
-from langchain_core.messages import ToolMessage, HumanMessage, RemoveMessage, SystemMessage
+from langchain_core.messages import ToolMessage, HumanMessage, AIMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, ToolException
 from langgraph.graph.state import Checkpointer
@@ -38,6 +38,26 @@ class BaseAgentBuilder:
         self.llm_with_tools = self.llm.bind_tools(self.tools)
         self.tools_by_name = {tool.name: tool for tool in self.tools}
         self.agent_config = agent_config
+        
+    def _get_messages_from_last_summary(self, state: AgentState) -> list:
+        """
+        Combines the current summary (if any), and the relevant messages since the last summary.
+        """
+        messages = []
+
+        summary = state.get("summary", {})
+        
+        summary_text = summary.get("text", "")
+        msg_count = summary.get("msg_count", 0)
+        
+        if summary_text:
+            messages.append(SystemMessage(content=f"Conversation summary: {summary_text}"))
+            # Get messages since last summary only + current messages window
+            messages += state["messages"][msg_count:]
+        else:
+            messages += state["messages"]
+
+        return messages
     
     def summarize_conversation_node(self, state: AgentState):
         """
@@ -52,32 +72,29 @@ class BaseAgentBuilder:
 
         Returns:
             A dictionary with the updated summary and a condensed list of messages."""
-        summary = state.get("summary", "")
-        if summary:
-            summary_message = (
-                f"This is summary of the conversation to date: {summary}\n"
-                "Extend the summary by taking into account the new messages above:" )
-        else:
-            summary_message = "Create a summary of the conversation above:"
+        summary = state.get("summary", {})
+        summary_text = summary.get("text", "")
+        
+        messages = self._get_messages_from_last_summary(state)
+        
+        summary_prompt = "Create a summary of the conversation above:"
+        if summary_text:
+            summary_prompt = (
+                "Extend the current summary by incorporating the new messages above. "
+                "Maintain a concise but complete overview of the entire conversation."
+            )
 
-        messages = state["messages"] + [HumanMessage(content=summary_message)]
+        messages.append(HumanMessage(content=summary_prompt))
         response = self.llm.invoke(messages)
 
-        new_messages = [RemoveMessage(id=m.id) for m in messages[:-1]]
+        logging.debug(f"Conversation summarized. New history window will start from index {len(state['messages'])}")
 
-        # Mark this response explicitly as a summary so that it can be filtered
-        # out from the memory endpoints results.
-        # Summary are used to condense the conversation but should not appear
-        # as part of the conversation history.
-        summary_msg = SystemMessage(
-            content="Conversation summary: " + response.content,
-            additional_kwargs={"is_summary": True} 
-        )
-        new_messages = new_messages + [summary_msg]
-
-        logging.debug("summarizing conversation")
-        
-        return {"summary": response.content, "messages": new_messages}
+        return {
+            "summary": {
+                "text": response.content,
+                "msg_count": len(state["messages"])
+            }
+        }
 
     def _invoke_llm_with_retry(self, messages: list, config: RunnableConfig):
         """
@@ -111,10 +128,20 @@ class BaseAgentBuilder:
             A dictionary containing the LLM's response message."""
         
         logging.debug("calling model")
-        messages = [SystemMessage(content=self.system_prompt)] + state["messages"]
-        response = self._invoke_llm_with_retry(messages, config)
+
+        base_messages = self._get_messages_from_last_summary(state)
         
+        # Add the System Prompt - it should be used only for user requests
+        messages = []
+        if self.system_prompt.strip():
+            messages.append(SystemMessage(content=self.system_prompt))
+        
+        messages.extend(base_messages)
+
+        response = self._invoke_llm_with_retry(messages, config)
+
         response.additional_kwargs["request_id"] = config["configurable"]["request_id"]
+        response.additional_kwargs["selected_agent"] = state.get("selected_agent", {})
 
         logging.debug("model call finished")
 
@@ -141,7 +168,10 @@ class BaseAgentBuilder:
         for tool_call in getattr(state["messages"][-1], "tool_calls", []):
             should_continue, interrupt_message = handle_interrupt(getattr(self.agent_config, "human_validation_tools", []), tool_call)
 
-            additional_kwargs = { "request_id": request_id }
+            additional_kwargs = {
+                "request_id": request_id,
+                "selected_agent": state.get("selected_agent", {})
+            }
 
             if interrupt_message:
                 additional_kwargs["interrupt_message"] = interrupt_message
@@ -213,12 +243,18 @@ class BaseAgentBuilder:
             "summarize_conversation", or "end"."""
         messages = state["messages"]
         last_message = messages[-1]
-        if not getattr(last_message, "tool_calls", []):
-            if len(messages) > 7:
-                return "summarize_conversation"
-            return "end"
-        else:
+
+        if getattr(last_message, "tool_calls", []):
             return "continue"
+
+        summary = state.get("summary", {})
+        
+        # Summarize batches of 7 messages - this threshold is arbitrary
+        last_count = summary.get("msg_count", 0) if summary else 0
+        if len(messages) - last_count >= 7:
+            return "summarize_conversation"
+
+        return "end"
         
     def should_continue(self, state: AgentState):
         """Check if agent should continue based on tool calls."""

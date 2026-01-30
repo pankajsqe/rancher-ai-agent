@@ -24,7 +24,18 @@ def add_messages_with_timestamp(left: Sequence[BaseMessage], right: Sequence[Bas
 
     return add_messages(left, new_messages)
 
+class SelectedAgent(TypedDict):
+    """Information about the selected agent."""
+    name: str
+    mode: str # auto/manual
+
+class Summary(TypedDict):
+    """Summary information for the agent."""
+    text: str
+    msg_count: int
+
 class AgentState(TypedDict):
     """The state of the agent."""
+    selected_agent: SelectedAgent
     messages: Annotated[Sequence[BaseMessage], add_messages_with_timestamp]
-    summary: str
+    summary: Summary
