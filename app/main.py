@@ -1,13 +1,15 @@
+import asyncio
 import logging
 import os
+import signal
 import certifi
 
 from fastapi import FastAPI
 from fastapi.concurrency import asynccontextmanager
-
 from .services.agent.loader import ensure_default_ai_agent_config_crds
 from .services.memory import create_memory_manager
 from .routers import agent, chat, websocket, ui
+from .controllers.ai_agent_config import create_kopf_manager
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
@@ -46,6 +48,7 @@ class SimpleTruststore:
         else:
             logging.warning(f"Company cert not found at {company_cert_path}, skipping truststore setup.")
 
+        
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
@@ -58,15 +61,21 @@ async def lifespan(app: FastAPI):
         logging.info(f"Startup: {len(configs)} AIAgentConfig CRDs in the cluster.")
 
         app.memory_manager = await create_memory_manager()
+        app.kopf_manager = create_kopf_manager()
+        app.kopf_manager.start()
 
         app.state.ready = True
+
     except ValueError as e:
         app.state.ready = False
         logging.critical(e)
         raise e
+    
     yield
-    await app.memory_manager.destroy()
 
+    app.kopf_manager.stop()
+    await app.memory_manager.destroy()
+    
 app = FastAPI(lifespan=lifespan)
 
 app.include_router(websocket.router)
