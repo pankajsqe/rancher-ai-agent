@@ -1,7 +1,7 @@
 aiAgent:
   image:
     repository: ghcr.io/rancher/rancher-ai-agent
-    tag: v0.1.2-alpha.22
+    tag: v0.1.2-alpha.24
     pullPolicy: IfNotPresent
 mcp:
   image:
