@@ -28,7 +28,7 @@ spec:
         name: mcp-server
         ports:
          - containerPort: 9092
-        command: ["/mcp"]
+        command: ["/usr/local/bin/mcp"]
         args:
           - "serve"
           - "--port"

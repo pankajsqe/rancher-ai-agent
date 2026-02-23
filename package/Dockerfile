@@ -1,57 +1,51 @@
-# =================================================================
-# Stage 1: Build the documentation artifact
-# This stage uses a lightweight image (alpine) to download, extract,
-# and isolate the required documentation folders. The output of this
-# stage is a clean /rancher_docs directory that we can copy later.
-# =================================================================
-FROM alpine:latest AS docs-builder
+ARG PYTHON_VERSION=3.13
+ARG UID=1000
+ARG GID=1000
 
-ARG DOCS_URL=https://github.com/rancher/rancher-docs/archive/refs/tags/initial-snapshot-v2.12.2.tar.gz
-# Add a build argument to control which docs are copied. Defaults to 'false'.
-ARG COPY_ALL_DOCS=true
+FROM registry.suse.com/bci/bci-micro:15.7 AS target
 
-LABEL stage="docs-builder"
-WORKDIR /tmp/src
+FROM registry.suse.com/bci/bci-base:15.7 AS builder
+ARG PYTHON_VERSION
+ARG UID
+ARG GID
+COPY --from=target / /target
 
-RUN apk add --no-cache wget && \
-    wget -O rancher-docs.tar.gz ${DOCS_URL} && \
-    tar -xvzf rancher-docs.tar.gz --strip-components=1
+# Install python on both builder and target.
+RUN PY_ZYPP=$(echo ${PYTHON_VERSION} | tr -d '.') && \
+    zypper --non-interactive install --no-recommends python${PY_ZYPP} python${PY_ZYPP}-pip && \
+    zypper --non-interactive --installroot /target install --no-recommends python${PY_ZYPP} python${PY_ZYPP}-pip
 
-# Use a single RUN command with a shell 'if' statement
-RUN mkdir /rancher_docs && mkdir /fleet_docs &&\
-    if [ "${COPY_ALL_DOCS}" = "true" ]; then \
-        mv /tmp/src/docs/* /rancher_docs/; \
-    else \
-        mv /tmp/src/docs/troubleshooting /rancher_docs/ && \
-        mv /tmp/src/docs/reference-guides /rancher_docs/; \
-    fi
+# Create group and user 'ai-agent' (UID/GID 1000) with no home directory and no shell.
+RUN echo "ai-agent:x:${GID}:" >> /target/etc/group && \
+    echo "ai-agent:x:${UID}:${GID}:rancher-ai-agent-user:/nonexistent:/usr/bin/false" >> /target/etc/passwd
 
-# Copy fleet docs
-RUN apk add --no-cache git && \
-    git clone https://github.com/rancher/fleet-docs.git && \
-    mv fleet-docs/docs/* /fleet_docs
+# Create python3 symlink.
+RUN ln -sf python${PYTHON_VERSION} /target/usr/bin/python3
 
+# Install dependencies via uv.
+RUN pip install --no-cache-dir uv
+COPY pyproject.toml .
+RUN uv pip install --no-cache --system \
+    --python /usr/bin/python${PYTHON_VERSION} \
+    --target /target/usr/lib/python${PYTHON_VERSION}/site-packages \
+    -r pyproject.toml
 
-#TODO - add more documentation as needed
-#TODO - add RAG data cleanup
+FROM scratch
+ARG PYTHON_VERSION
+ARG UID
+ARG GID
 
-# =================================================================
-# Stage 2: Build the final application image
-# This stage uses the Python base image, copies your application code,
-# installs runtime dependencies, and copies the prepared documentation
-# artifact from the first stage.
-# =================================================================
-FROM registry.suse.com/bci/python:3.13
+COPY --from=builder /target /
+
+# Runtime hardening: Ensure real-time logs, compatibility with read-only filesystems, and library discovery.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/usr/lib/python${PYTHON_VERSION}/site-packages \
+    PATH="/usr/local/bin:/usr/bin:/bin"
 
 WORKDIR /app
+COPY --chown=${UID}:${GID} . .
 
-RUN pip install uv
+USER ${UID}:${GID}
 
-COPY . .
-
-RUN uv pip install --system -r pyproject.toml
-
-COPY --from=docs-builder /rancher_docs /rancher_docs
-COPY --from=docs-builder /fleet_docs /fleet_docs
-
-CMD ["fastapi", "run", "app/main.py"]
+CMD ["/usr/bin/python3", "-m", "fastapi", "run", "app/main.py"]
