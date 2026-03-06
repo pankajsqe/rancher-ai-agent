@@ -204,7 +204,8 @@ def _create_default_ai_agent_config_crds(api: client.CustomObjectsApi):
                 "enabled": True,
                 "humanValidationTools": [
                     "createKubernetesResource", 
-                    "patchKubernetesResource"
+                    "patchKubernetesResource",
+                    "createProject"
                 ]
             }
         }
