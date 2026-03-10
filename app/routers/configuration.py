@@ -24,11 +24,17 @@ AVAILABLE_LLM_PROVIDERS = {"ollama", "openai", "gemini", "bedrock"}
 # Hardcoded models
 AVAILABLE_MODELS = {
     "openai": [
+        "gpt-5",
+        "gpt-5-turbo",
+        "gpt-5-mini",
+        "o3",
+        "o3-mini",
+        "o1",
+        "o1-preview",
         "gpt-4o",
         "gpt-4o-mini",
-        "o3-mini",
-        "o3",
         "gpt-4.1",
+        "gpt-4-turbo",
         "gpt-4",
         "gpt-3.5-turbo",
     ],
@@ -189,13 +195,15 @@ async def get_models(request: Request, llm_name: str):
                         # Extract regional prefix from region and ensure model IDs are prefixed with the region if not already
                         # e.g. 'eu-west-1' -> 'eu.{modelId}', 'us-east-1' -> 'us.{modelId}'
                         region_prefix = region.split('-')[0]
-                        if region_prefix not in ['us', 'eu', 'ap', 'ca']:
+                        if region_prefix not in ['us', 'eu', 'ap', 'ca', 'sa', 'af', 'me']:
                             raise HTTPException(
                                 status_code=status.HTTP_400_BAD_REQUEST,
                                 detail=f"Invalid Bedrock region format: {region}"
                             )
+                        
+                        # Skip prefix for openai models or already prefixed models
                         bedrock_models = [
-                            model if model.startswith(f"{region_prefix}.") else f"{region_prefix}.{model}"
+                            model if (model.startswith("openai") or model.startswith(f"{region_prefix}.")) else f"{region_prefix}.{model}"
                             for model in bedrock_models
                         ]
                         
