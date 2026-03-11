@@ -1,7 +1,7 @@
 aiAgent:
   image:
     repository: ghcr.io/rancher/rancher-ai-agent
-    tag: v1.0.0-rc.1
+    tag: v1.0.0-rc.2
     pullPolicy: IfNotPresent
 mcp:
   readOnly: false
